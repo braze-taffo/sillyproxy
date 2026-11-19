@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+setup.json
+chrome-profile/
+*.pem
+*.key

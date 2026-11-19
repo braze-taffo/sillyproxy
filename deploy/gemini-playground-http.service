@@ -1,0 +1,9 @@
+[Unit]
+Description=Forward public HTTP to the Gemini Playground gateway
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=10min 127.0.0.1:8788
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes

@@ -1,0 +1,28 @@
+[Unit]
+Description=Gemini Playground OpenAI gateway
+After=network-online.target gemini-playground-login.service
+Wants=network-online.target
+Conflicts=gemini-playground-login.service
+StartLimitIntervalSec=60
+StartLimitBurst=4
+
+[Service]
+User=gemini-playground
+Group=gemini-playground
+UMask=0077
+RuntimeDirectory=gemini-playground
+RuntimeDirectoryMode=0700
+StateDirectory=gemini-playground
+StateDirectoryMode=0700
+LoadCredential=gateway.json:/etc/gemini-playground/config.json
+ExecStart=/opt/gemini-playground/current/.venv/bin/python /opt/gemini-playground/current/gateway.py
+ProtectHome=yes
+ProtectSystem=strict
+PrivateTmp=yes
+KillMode=mixed
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=4
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Public HTTP listener for Gemini Playground
+
+[Socket]
+ListenStream=0.0.0.0:80
+NoDelay=yes
+
+[Install]
+WantedBy=sockets.target

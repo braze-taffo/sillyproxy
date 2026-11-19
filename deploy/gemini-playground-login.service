@@ -1,0 +1,19 @@
+[Unit]
+Description=Temporary Gemini Playground browser login
+Conflicts=gemini-playground.service
+
+[Service]
+User=gemini-playground
+Group=gemini-playground
+UMask=0077
+RuntimeDirectory=gemini-playground-login
+RuntimeDirectoryMode=0700
+StateDirectory=gemini-playground
+StateDirectoryMode=0700
+ExecStart=/opt/gemini-playground/current/.venv/bin/python /opt/gemini-playground/current/desktop.py
+ProtectHome=yes
+ProtectSystem=strict
+PrivateTmp=yes
+KillMode=mixed
+TimeoutStopSec=35
+RuntimeMaxSec=20min
