@@ -1,0 +1,6 @@
+# Keep shell scripts and Python files LF on every platform: the installer runs
+# on Linux and a CRLF shebang breaks it.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.zip binary
