@@ -175,6 +175,7 @@ def make_app(browser, client_key, upstream=None):
                 await write_event(shape(".chunk", {"delta": {"role": "assistant"}, "finish_reason": None}))
             await write_event(shape(".chunk", {"delta": {"content": delta}, "finish_reason": None}))
 
+        began = time.monotonic()
         try:
             try:
                 # A concrete upstream id is honoured exactly; the alias lets the
@@ -182,7 +183,11 @@ def make_app(browser, client_key, upstream=None):
                 text = await browser.generate(
                     prompt, emit if stream else None, None if requested == ALIAS else requested
                 )
+                LOG.info("chat model=%s stream=%s ok chars=%d %.1fs",
+                         requested, stream, len(text), time.monotonic() - began)
             except PlaygroundError as exc:
+                LOG.info("chat model=%s stream=%s failed=%s %.1fs",
+                         requested, stream, exc.code, time.monotonic() - began)
                 if response is None:
                     return error(exc.status, exc.code, exc.message)
                 await write_event({"error": {"code": exc.code, "message": exc.message}})

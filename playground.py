@@ -32,6 +32,9 @@ RETRIES = 6
 # 504 is a stuck page: retrying every 150s timeout would hold the gateway for
 # many minutes, so it is surfaced too.
 RETRYABLE = (403, 503)
+# If the page has not fired GenerateContent within this many seconds, it is
+# stuck: fail the attempt so it can retry instead of blocking for 150s.
+NO_SEND_TIMEOUT = 20
 
 
 def chat_url(model):
@@ -495,7 +498,8 @@ class StudioUI:
         pieces, raw = [], []
         status, ended = None, False
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + 150
+        started_at = loop.time()
+        deadline = started_at + 150
 
         while loop.time() < deadline:
             for event in await page.evaluate(DRAIN_JS):
@@ -523,6 +527,13 @@ class StudioUI:
                         pieces.append(chunk)
                         await relay(chunk)
                 break
+            if status is None and loop.time() - started_at > NO_SEND_TIMEOUT:
+                # The page never fired GenerateContent: it is stuck, and waiting
+                # out the full generation deadline would just block the gateway.
+                raise PlaygroundError(
+                    503, "send_timeout",
+                    "AI Studio did not start generating for this prompt. Retry shortly.",
+                )
             if urlsplit(page.url).hostname == "accounts.google.com":
                 raise PlaygroundError(503, "login_required", "Sign in to Google in the login window.")
             await asyncio.sleep(0.12)
