@@ -1,18 +1,26 @@
 # AI 安装指引
 
-用户发来这个仓库链接并要求安装时，读完本文件再操作。每一步先在实际环境核验，再继续。用户让你停在部署测试前时，保持线上环境不变。
+用户发来这个仓库链接并要求安装时，读完本文件再操作。
 
-## 1. 询问位置，连接到服务器
+**读完本文件后，第一件事是停下来问用户，不要先自己扫描本机或服务器的 SSH 配置，也不要试探任何主机。** 把下面三个问题一次问清，等用户回答后再动手：
 
-先问：「装在你现在用的这台电脑，还是装到远程服务器？」确认你能运行终端。远程请用户提供平时用的 SSH 命令，或公网 IP、端口和用户名。先尝试已有 SSH 配置或密钥登录。核对 SSH 服务器指纹，遇到指纹变化时让用户用云控制台或管理员资料确认。
+1. 装在你现在用的这台电脑，还是远程服务器？
+2. 如果是远程：你已经有能直接登录的 SSH 别名或密钥，还是只有公网 IP、端口、用户名和密码？
+3. 服务器是什么系统（例如 Ubuntu 24.04 或 26.04）？
 
-已有免密连接时，在用户看得见的电脑打开连接助手。有 SSH 别名就使用别名，指定私钥时使用 `--identity`，SSH 端口等其它参数使用已核对的 SSH 配置。
+用户回答前不要执行连接、探测、安装类命令。每一步先在实际环境核验，再继续。用户让你停在部署测试前时，保持线上环境不变。
+
+## 1. 连接到服务器
+
+按用户的回答二选一。
+
+**用户已有 SSH 别名或密钥**：在用户看得见的电脑打开连接助手。有别名就使用别名，指定私钥时用 `--identity`，SSH 端口等其它参数使用已核对的 SSH 配置。
 
 ~~~sh
 python3 tools/connect.py --ssh-alias my-server
 ~~~
 
-只有用户名和密码时，在 AI 运行环境生成一次性的 Ed25519 密钥，私钥保留在该环境，交给用户的文件只有公钥。使用隔离的目标路径生成，避开已有私钥。以 Linux/macOS Shell 为例：
+**用户只有用户名和密码**：在 AI 运行环境生成一次性的 Ed25519 密钥，私钥保留在该环境，交给用户的文件只有公钥。使用隔离的目标路径生成，避开已有私钥。以 Linux/macOS Shell 为例：
 
 ~~~sh
 ssh-keygen -q -t ed25519 -N '' -f /path/to/setup-only
@@ -21,7 +29,7 @@ python3 -m venv .venv
 .venv/bin/python tools/connect.py --public-key /path/to/setup-only.pub
 ~~~
 
-Windows 虚拟环境的 Python 是 `.venv\Scripts\python.exe`，也可用 `py -3` 启动已具备依赖的 Python。远程模式的首次 SSH 密码只在用户电脑的弹窗里输入。指纹核对成功后，助手把公钥加入授权文件，保存客户端 Key。验证 AI 自己能用新密钥登录，再接手服务器操作。
+连接前核对 SSH 服务器指纹，遇到指纹变化时让用户用云控制台或管理员资料确认。Windows 虚拟环境的 Python 是 `.venv\Scripts\python.exe`，也可用 `py -3` 启动已具备依赖的 Python。远程模式的首次 SSH 密码只在用户电脑的弹窗里输入。指纹核对成功后，助手把公钥加入授权文件，保存客户端 Key。验证 AI 自己能用新密钥登录，再接手服务器操作。
 
 如果你的 AI 终端在云端，把项目文件和公钥交给用户在自己的电脑启动安装助手。让用户在连接成功后复制客户端 API Key，保持窗口打开，并告诉你「已连接」。部署和登录阶段可复用该窗口的 SSH 连接。实在无法弹窗时，让用户使用自己的 SSH 终端，并用 SSH 隧道打开下文的临时登录界面。SSH 密码和 Google 凭据都由用户自己输入。
 
@@ -36,7 +44,7 @@ sudo apt-get update
 sudo apt-get install -y ca-certificates curl python3 python3-venv xvfb xauth x11-utils x11vnc novnc websockify
 ~~~
 
-使用系统已有的 Google Chrome，或者从 [Google Chrome 官方下载页](https://www.google.com/chrome/) 获取 Linux Debian/Ubuntu 64 位安装包，交给系统包管理器安装。确认 `/usr/bin/google-chrome` 存在。浏览器以专用的非 root 帐号运行，并使用 Chrome 自身的沙箱。
+使用系统已有的 Google Chrome，或者从 [Google Chrome 官方下载页](https://www.google.com/chrome/) 获取 Linux Debian/Ubuntu 64 位安装包，交给系统包管理器安装。确认 `/usr/bin/google-chrome` 存在。浏览器以专用的非 root 帐号运行；因为服务本身没有登录会话，Chrome 以 `--no-sandbox` 启动，隔离由 systemd 单元（`ProtectSystem=strict`、`ProtectHome=yes`、`PrivateTmp=yes`、`NoNewPrivileges`）承担。
 
 ~~~sh
 sudo -n bash deploy/install.sh \
