@@ -1,6 +1,12 @@
-# Gemini Playground 网关
+# SillyProxy — Gemini Playground 网关
 
 用自己的 Google 账号登录 AI Studio 网页。网关复用这份浏览器登录状态，通过网页聊天界面提交提示词，再把回答提供给 OpenAI 兼容客户端。**无需创建 Gemini API Key。**
+
+仓库地址：<https://github.com/braze-taffo/sillyproxy>
+
+~~~sh
+git clone https://github.com/braze-taffo/sillyproxy
+~~~
 
 ## 给 AI 安装
 
