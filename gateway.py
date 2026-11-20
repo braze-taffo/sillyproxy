@@ -180,7 +180,7 @@ def make_app(browser, client_key, upstream=None):
             except (ConnectionResetError, asyncio.CancelledError):
                 raise
             except Exception:
-                LOG.warning("Browser request failed")
+                LOG.warning("Browser request failed", exc_info=True)
                 if response is None:
                     return error(502, "browser_error", "Browser request failed.")
                 await write_event({"error": {"code": "browser_error", "message": "Browser request failed."}})

@@ -13,8 +13,8 @@ from display import spawn, stop_process
 
 STUDIO = "https://aistudio.google.com"
 # AI Studio's BotGuard attestation rejects automated browsers with 403
-# "The caller does not have permission". Mirror the proven server-203
-# executor: a normal desktop Chrome UA and no automation markers.
+# "The caller does not have permission". Use a normal desktop Chrome UA and
+# no automation markers, as a plain headless Chrome would.
 NORMAL_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36"
@@ -29,7 +29,9 @@ CHAT = STUDIO + "/prompts/new_chat?temporary=true&model=" + UPSTREAM_MODELS[0]
 RETRIES = 6
 # 429 means the model's usage limit is exhausted: retrying cannot help and
 # burns quota, so it is surfaced instead (the caller may pick another model).
-RETRYABLE = (403, 503, 504)
+# 504 is a stuck page: retrying every 150s timeout would hold the gateway for
+# many minutes, so it is surfaced too.
+RETRYABLE = (403, 503)
 
 
 def chat_url(model):
@@ -246,7 +248,9 @@ class WireStream:
 
     def __init__(self):
         self.buf, self.consumed = "", 0
-        self.trimmed, self.outer_skipped = False, False
+        self.trimmed = False
+        # Number of leading '[' already stripped (the body wraps frames twice).
+        self.outer_skipped = 0
 
     def feed(self, delta):
         self.buf += delta
@@ -295,20 +299,17 @@ class WireStream:
             return "", 0, False
         if data[i] == "]":
             return "", 0, False  # end of the outer array
-        if not self.outer_skipped and data[i] == "[":
+        if self.outer_skipped < 2 and data[i] == "[":
             # The body wraps the frames in two arrays: [[frame, frame, ...]].
-            # Strip both opening brackets once.
-            i += 1
-            for _ in range(1):
+            # Strip both opening brackets, resumably: the split may fall
+            # between them, and a half-done skip used to truncate the answer.
+            while self.outer_skipped < 2 and i < length and data[i] == "[":
+                i += 1
+                self.outer_skipped += 1
                 while i < length and data[i] in " \n\r\t":
                     i += 1
-                if i < length and data[i] == "[":
-                    i += 1
-            self.outer_skipped = True
-            # Persist the skip: without it every later call would rescan the
-            # whole outer array as one element and never complete.
             self.consumed = i
-            if i >= length:
+            if self.outer_skipped < 2 or i >= length:
                 return "", 0, False
         return _scan_value(data, i)
 COMPOSERS = (
@@ -561,10 +562,10 @@ def free_loopback_port():
 class Playground:
     """Drives a native Chrome through Playwright-over-CDP.
 
-    Chrome is launched with the same flags as the proven server-203 executor
-    (normal desktop UA, no automation markers, headless=new). Playwright's own
-    launcher adds flags that stall AI Studio's BotGuard send pipeline, so we
-    only attach to the debug endpoint instead of letting Playwright launch.
+    Chrome is launched by us rather than by Playwright: a normal desktop UA,
+    no automation markers and `--headless=new`. Playwright's own launcher adds
+    flags that stall AI Studio's BotGuard send pipeline, so we only attach to
+    the debug endpoint instead of letting Playwright launch.
     """
 
     def __init__(self, runtime, state, models=None):

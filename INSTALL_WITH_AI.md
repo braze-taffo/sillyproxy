@@ -109,4 +109,4 @@ sudo -n python3 deploy/verify.py --generate --model gemini-4-hydrogen
 
 ## 本地开发测试
 
-安装 `requirements.txt` 后，在有 Chrome 的开发机上运行 `python3 -m unittest -v test_gateway`。测试用本地页面模拟 AI Studio：页面用 XHR 提交、按真实格式流式返回 protobuf-as-JSON 帧，覆盖提示词输入、原始流解析、普通 API、SSE 增量、额度错误、无权限错误，以及「先 403、重发后成功」的重试路径。生产环境的浏览器启动、noVNC、Google 登录和外网访问在干净服务器上验收。
+安装 `requirements.txt` 后，在有 Chrome 的开发机上运行 `python3 -m unittest -v`。测试用本地页面模拟 AI Studio：页面用 XHR 提交、按真实格式流式返回 protobuf-as-JSON 帧，覆盖提示词输入、原始流解析（含分片边界）、普通 API、SSE 增量、额度错误、无权限错误，以及「先 403、重发后成功」的重试路径。生产环境的浏览器启动、noVNC、Google 登录和外网访问在干净服务器上验收。
