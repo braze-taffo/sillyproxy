@@ -22,6 +22,15 @@ if ((EUID != 0)) || [[ ! -d /run/systemd/system ]]; then
     printf '%s\n' '请在运行 systemd 的 Linux 电脑上用 sudo 或 root 启动。' >&2
     exit 1
 fi
+cpus=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0)
+mem_kb=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)
+cpus=${cpus:-0}
+mem_kb=${mem_kb:-0}
+if ((cpus < 2 || mem_kb < 1782579)); then
+    mem_gb=$(awk -v kb="$mem_kb" 'BEGIN {printf "%.2f", kb / 1048576}')
+    printf '服务器配置太低了，安装不了（当前 %s 核 / %s GiB 内存，最低需要 2 核 CPU 和 1.7 GiB 内存）。\n' "$cpus" "$mem_gb" >&2
+    exit 1
+fi
 for command in google-chrome python3 Xvfb xauth xdpyinfo x11vnc websockify curl flock; do
     command -v "$command" >/dev/null || { printf '缺少 %s\n' "$command" >&2; exit 1; }
 done

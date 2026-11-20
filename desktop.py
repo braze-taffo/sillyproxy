@@ -20,9 +20,19 @@ async def login():
     chrome = vnc = proxy = None
     async with Display(runtime, state, 188) as env:
         try:
-            chrome = await spawn("/usr/bin/google-chrome", f"--user-data-dir={state / 'chrome-profile'}",
-                                 "--no-first-run", "--window-size=1440,900", "--password-store=basic",
-                                 "https://aistudio.google.com/prompts/new_chat?temporary=true", env=env)
+            chrome = await spawn(
+                "/usr/bin/google-chrome",
+                f"--user-data-dir={state / 'chrome-profile'}",
+                "--profile-directory=Default",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-dev-shm-usage",
+                "--disable-features=SignInProfileCreation",
+                "--window-size=1440,900",
+                "--password-store=basic",
+                "https://aistudio.google.com/prompts/new_chat?temporary=true",
+                env=env,
+            )
             vnc = await spawn("/usr/bin/x11vnc", "-display", env["DISPLAY"], "-auth", env["XAUTHORITY"],
                               "-no6", "-listen", "127.0.0.1", "-rfbport", "15900", "-passwdfile", str(password),
                               "-forever", env=env)
@@ -38,7 +48,7 @@ async def login():
         finally:
             await stop_process(proxy)
             await stop_process(vnc)
-            await stop_process(chrome, 10)
+            await stop_process(chrome, 15)
 
 
 async def main():

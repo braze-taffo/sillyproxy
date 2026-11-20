@@ -1,8 +1,10 @@
 import asyncio
+from contextlib import closing
 import json
 from pathlib import Path
 import re
 import socket
+import sqlite3
 from urllib.parse import urlsplit
 from urllib.request import urlopen
 
@@ -570,6 +572,41 @@ def free_loopback_port():
         return probe.getsockname()[1]
 
 
+AUTH_COOKIES = ("SID", "HSID", "SSID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID")
+
+
+def _has_google_auth_cookies(profile_path):
+    placeholders = ",".join("?" for _ in AUTH_COOKIES)
+    query = (
+        f"SELECT 1 FROM cookies WHERE host_key LIKE '%google.com' "
+        f"AND name IN ({placeholders}) LIMIT 1"
+    )
+    for rel in ("Cookies", "Network/Cookies"):
+        db = profile_path / rel
+        if not db.is_file():
+            continue
+        for uri in (f"file:{db}?mode=ro", f"file:{db}?mode=ro&immutable=1"):
+            try:
+                with closing(sqlite3.connect(uri, uri=True, timeout=1)) as con:
+                    if con.execute(query, AUTH_COOKIES).fetchone():
+                        return True
+                break
+            except sqlite3.Error:
+                continue
+    return False
+
+
+def pick_profile_dir(profile_root):
+    """Return Default unless auth cookies were written to another Profile directory."""
+    if _has_google_auth_cookies(profile_root / "Default"):
+        return "Default"
+    if profile_root.is_dir():
+        for entry in sorted(profile_root.iterdir()):
+            if entry.is_dir() and entry.name.startswith("Profile ") and _has_google_auth_cookies(entry):
+                return entry.name
+    return "Default"
+
+
 class Playground:
     """Drives a native Chrome through Playwright-over-CDP.
 
@@ -591,8 +628,10 @@ class Playground:
         self.closed = True
 
     def chrome_flags(self, port):
+        profile_root = self.state / "chrome-profile"
         return [
-            f"--user-data-dir={self.state / 'chrome-profile'}",
+            f"--user-data-dir={profile_root}",
+            f"--profile-directory={pick_profile_dir(profile_root)}",
             f"--remote-debugging-port={port}",
             "--remote-debugging-address=127.0.0.1",
             "--no-sandbox",

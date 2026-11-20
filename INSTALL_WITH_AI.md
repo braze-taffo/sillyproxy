@@ -39,11 +39,16 @@ Windows 虚拟环境的 Python 是 `.venv\Scripts\python.exe`（创建虚拟环�
 
 如果你的 AI 终端在云端（无图形界面），可先在云端运行 `tools/connect.py --setup-key /path/to/setup-only --keygen-only` 生成密钥对（私钥留在云端），只把项目文件和生成的 `.pub` 公钥交给用户在自己电脑启动安装助手（`tools/connect.py --public-key setup-only.pub --host <IP> --port <端口> --user <用户名>`）。让用户在连接成功后复制客户端 API Key，保持窗口打开，并告诉你「已连接」。部署和登录阶段可复用该窗口的 SSH 连接。实在无法弹窗时，让用户使用自己的 SSH 终端，并用 SSH 隧道打开下文的临时登录界面。SSH 密码和 Google 凭据都由用户自己输入。
 
-服务器安装面向 Ubuntu 24.04 或 26.04 x86-64。先查系统、架构、可用端口以及管理员权限。AI 能非交互使用 sudo 时用 `sudo -n`。已经是 root 就直接运行管理员命令。需要交互 sudo 时，由用户在自己的终端输入密码。
+服务器安装面向 Ubuntu 24.04 或 26.04 x86-64。连上服务器后，先查系统、架构、CPU 核心数、内存大小、可用端口以及管理员权限（例如 `nproc` 和 `awk '/^MemTotal:/ {print $2}' /proc/meminfo`）。**如果服务器总内存低于 1.7 GiB（`MemTotal < 1782579` KiB）或 CPU 核心数低于 2 核，直接告诉用户「服务器配置太低了，安装不了」（可附带查到的核心数与内存），然后立即停止安装**，不要继续安装依赖或部署服务（如果刚写入了 `~/.cache/gemini-playground/setup.json` 或临时公钥，顺手清理干净）。配置满足后，AI 能非交互使用 sudo 时用 `sudo -n`；已经是 root 就直接运行管理员命令；需要交互 sudo 时，由用户在自己的终端输入密码。
 
 ## 2. 安装并启动网关
 
-把当前仓库下载或复制到目标主机。检查 TCP 8788 是否空闲，同时确认登录用的回环端口 15900 和 16080 没有被已有服务占用。根据权限安装缺少的软件包。下面是 Ubuntu 上所需的依赖：
+**在正式开始安装前，先停下来向用户确认以下两项免责声明**，等用户明确同意后再动手（若用户不接受，立即停止安装，并清理已写入的 `~/.cache/gemini-playground/setup.json` 和本次临时公钥）：
+
+1. **可用性不作长期保证**：现在能用不代表以后一直能用，随着 Google 风控策略升级或网页调整，本工具随时可能失效。
+2. **请求稳定性与额度限制**：反向代理无法保证每一次请求都 100% 成功响应，偶发失败属于正常现象；另外没有 Google Pro 订阅的普通账号，可用额度会比 Pro 账号少很多。
+
+用户确认接受免责声明后，再把当前仓库下载或复制到目标主机。检查 TCP 8788 是否空闲，同时确认登录用的回环端口 15900 和 16080 没有被已有服务占用。根据权限安装缺少的软件包。下面是 Ubuntu 上所需的依赖：
 
 ~~~sh
 sudo apt-get update
@@ -76,15 +81,20 @@ curl --noproxy '*' -fsS --max-time 5 --retry 12 --retry-connrefused --retry-dela
 ssh -N -L 127.0.0.1:16080:127.0.0.1:16080 my-server
 ~~~
 
-让用户在自己电脑的浏览器打开 `http://127.0.0.1:16080/vnc.html`。用户在远程 Chrome 里亲自输入 Google 凭据、完成验证并进入 AI Studio 聊天页。让用户妥善保管 Chrome 登录资料，并在浏览器提示时选择是否保存 Google 密码。AI 等用户报告「登录好了」，再停止登录窗口并启动网关。这个顺序让 Chrome 有时间写回会话资料。
+让用户在自己电脑的浏览器打开 `http://127.0.0.1:16080/vnc.html`。用户在远程 Chrome 里亲自输入 Google 凭据、完成验证并进入 AI Studio 聊天页（提醒用户：**直接在网页里登录即可；如果 Chrome 弹出「登录 Chrome / 开启同步 / 创建新配置文件」之类弹窗，点「不登录 / 暂不 / 取消」，也不要开无痕或访客窗口**；确认页面右上角已显示 Google 头像且聊天输入框可见后再告知 AI「登录好了」）。
+
+收到用户「登录好了」后，**先不要立刻停止登录窗口**！Chrome 把新登录的 Cookie 刷新到磁盘最多有约 30 秒缓冲延迟，如果刚登录完立刻停服务，可能丢掉刚写入的登录态。先执行 `--wait-cookies` 等待并确认 Google 登录态真正落盘，再停登录窗口、启动网关并验收：
 
 ~~~sh
+sudo -n python3 deploy/verify.py --wait-cookies
 sudo -n systemctl stop gemini-playground-login.service
 sudo -n systemctl start gemini-playground.service
 curl --noproxy '*' -fsS --max-time 5 --retry 12 --retry-connrefused --retry-delay 1 \
   http://127.0.0.1:8788/healthz
 sudo -n python3 deploy/verify.py
 ~~~
+
+如果 `--wait-cookies` 超时未检测到登录 Cookie，**先保持登录窗口开着（不要关掉让用户重登）**，请用户在远程 Chrome 里刷新一次 AI Studio 页面或确认右上角是否已显示头像，然后再重新执行 `--wait-cookies`。
 
 检查 `deploy/verify.py` 报告的浏览器状态为 `ready`。遇到 Google 提示验证、地区限制、配额用尽或登录失败时，把实际状态告知用户，等待用户在普通浏览器里处理。
 

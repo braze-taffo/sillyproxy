@@ -1,11 +1,60 @@
 import argparse
+from contextlib import closing
 import ipaddress
 import json
+from pathlib import Path
+import sqlite3
 import sys
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from configure import protected_json
+
+
+AUTH_COOKIES = ("SID", "HSID", "SSID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID")
+
+
+def find_auth_cookie_profile(profile_root):
+    root = Path(profile_root)
+    if not root.is_dir():
+        return None
+    candidates = [root / "Default"]
+    candidates.extend(
+        sorted(entry for entry in root.iterdir() if entry.is_dir() and entry.name.startswith("Profile "))
+    )
+    placeholders = ",".join("?" for _ in AUTH_COOKIES)
+    query = (
+        f"SELECT 1 FROM cookies WHERE host_key LIKE '%google.com' "
+        f"AND name IN ({placeholders}) LIMIT 1"
+    )
+    for profile in candidates:
+        for rel in ("Cookies", "Network/Cookies"):
+            db = profile / rel
+            if not db.is_file():
+                continue
+            for uri in (f"file:{db}?mode=ro", f"file:{db}?mode=ro&immutable=1"):
+                try:
+                    with closing(sqlite3.connect(uri, uri=True, timeout=1)) as con:
+                        if con.execute(query, AUTH_COOKIES).fetchone():
+                            return profile.name
+                    break
+                except sqlite3.Error:
+                    continue
+    return None
+
+
+def wait_for_cookies(profile_root, timeout):
+    deadline = time.monotonic() + max(timeout, 0)
+    while True:
+        found = find_auth_cookie_profile(profile_root)
+        if found:
+            print(f"已检测到 Google 登录态写入磁盘（{found}）。")
+            return 0
+        if time.monotonic() >= deadline:
+            print("尚未检测到 Google 登录 Cookie 写入磁盘，请保持登录窗口打开并确认已完成登录或刷新页面后重试。", file=sys.stderr)
+            return 1
+        time.sleep(2)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -18,7 +67,12 @@ def verify():
     parser.add_argument("--config", default="/etc/gemini-playground/config.json")
     parser.add_argument("--model", default="gemini-playground", help="model id sent to the gateway")
     parser.add_argument("--generate", action="store_true", help="send one normal and one streaming test prompt")
+    parser.add_argument("--wait-cookies", action="store_true", help="wait for Chrome to flush Google login cookies to disk before stopping the login window")
+    parser.add_argument("--profile-dir", default="/var/lib/gemini-playground/chrome-profile")
+    parser.add_argument("--wait-timeout", type=int, default=40)
     args = parser.parse_args()
+    if args.wait_cookies:
+        return wait_for_cookies(args.profile_dir, args.wait_timeout)
     cfg = protected_json(args.config)
     bind = ipaddress.ip_address(cfg["bind"])
     if bind.is_unspecified:
