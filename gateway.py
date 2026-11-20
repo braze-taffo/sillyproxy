@@ -18,6 +18,8 @@ from playground import UPSTREAM_MODELS, Playground, PlaygroundError
 ALIAS = "gemini-playground"
 LOG = logging.getLogger("gateway")
 ALLOWED = {"model", "messages", "stream", "stream_options", "n", "user"}
+# Seconds a request may wait for the single browser slot before 429.
+QUEUE_WAIT = 30
 
 
 def model_entries(upstream):
@@ -117,12 +119,17 @@ def make_app(browser, client_key, upstream=None):
     async def status(_):
         if busy.locked():
             return web.json_response({"state": "busy"})
-        async with busy:
-            try:
-                await browser.check_session()
-                return web.json_response({"state": "ready"})
-            except PlaygroundError as exc:
-                return web.json_response({"state": exc.code, "message": exc.message})
+        try:
+            await asyncio.wait_for(busy.acquire(), 5)
+        except TimeoutError:
+            return web.json_response({"state": "busy"})
+        try:
+            await browser.check_session()
+            return web.json_response({"state": "ready"})
+        except PlaygroundError as exc:
+            return web.json_response({"state": exc.code, "message": exc.message})
+        finally:
+            busy.release()
 
     async def chat(request):
         try:
@@ -135,7 +142,11 @@ def make_app(browser, client_key, upstream=None):
             return error(400, "invalid_request", "Send a valid request with a supported model and text messages.")
         except ValueError as exc:
             return error(400, "invalid_request", str(exc))
-        if busy.locked():
+        # The browser runs one request at a time. Queue briefly instead of
+        # rejecting every concurrent caller outright.
+        try:
+            await asyncio.wait_for(busy.acquire(), QUEUE_WAIT)
+        except TimeoutError:
             result = error(429, "gateway_busy", "The browser is processing one request. Retry shortly.")
             result.headers["Retry-After"] = "2"
             return result
@@ -164,7 +175,7 @@ def make_app(browser, client_key, upstream=None):
                 await write_event(shape(".chunk", {"delta": {"role": "assistant"}, "finish_reason": None}))
             await write_event(shape(".chunk", {"delta": {"content": delta}, "finish_reason": None}))
 
-        async with busy:
+        try:
             try:
                 # A concrete upstream id is honoured exactly; the alias lets the
                 # gateway walk the configured list when one model is unavailable.
@@ -186,6 +197,8 @@ def make_app(browser, client_key, upstream=None):
                 await write_event({"error": {"code": "browser_error", "message": "Browser request failed."}})
                 await response.write(b"data: [DONE]\n\n")
                 return response
+        finally:
+            busy.release()
         if stream:
             if response is None:
                 await emit(text)
