@@ -37,7 +37,8 @@ def frame(text, finish=None):
 
 
 def body(*frames):
-    return ")]}'\n" + json.dumps(list(frames))
+    """The real body wraps the frames twice: [[frame, frame, ...]]."""
+    return ")]}'\n" + json.dumps([list(frames)])
 
 
 class FixtureBrowser:
