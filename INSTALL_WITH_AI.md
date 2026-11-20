@@ -4,7 +4,7 @@
 
 用户发来这个仓库链接并要求安装或更新时，读完本文件再操作。
 
-**读完本文件后，第一件事是停下来问用户，不要先自己扫描本机或服务器的 SSH 配置，也不要试探任何主机。** 本项目面向远程 Linux 服务器部署（Ubuntu 24.04 或 26.04 x86-64）。把下面两个问题一次问清，并在**这一次回复的最后**注明当前版本号（以 [`VERSION`](VERSION) 为准，例如在末尾写「当前版本：v0.1.0」），等用户回答后再动手：
+**读完本文件后，第一件事是停下来问用户，不要先自己扫描本机或服务器的 SSH 配置，也不要试探任何主机。** 本项目面向远程 Linux 服务器部署（Ubuntu 24.04 或 26.04 x86-64）。把下面两个问题一次问清，并**仅在第一次提问的回复末尾**注明当前版本号（以 [`VERSION`](VERSION) 为准，例如在末尾写「当前版本：v0.1.0」，后续回复无需重复），等用户回答后再动手：
 
 1. 你已经有能直接登录服务器的 SSH 别名或密钥，还是只有公网 IP、端口、用户名和密码？
 2. 服务器是什么系统（例如 Ubuntu 24.04 或 26.04）？
@@ -21,18 +21,23 @@
 python3 tools/connect.py --ssh-alias my-server
 ~~~
 
-**用户只有用户名和密码**：在 AI 运行环境生成一次性的 Ed25519 密钥，私钥保留在该环境，交给用户的文件只有公钥。使用隔离的目标路径生成，避开已有私钥。以 Linux/macOS Shell 为例：
+**用户只有用户名和密码**：需要向用户询问服务器连接信息时，**把公网 IP、SSH 端口、SSH 用户名拆成三个独立问题分别提问，不要挤在同一个问题里（如果使用交互式提问工具，也要拆成 3 个独立问题项）**（并说明 SSH 密码不要发在聊天里，稍后在弹窗中输入）：
+
+1. 服务器的公网 IP 或主机名是什么？
+2. SSH 端口是多少（默认 `22`）？
+3. SSH 用户名是什么（例如 `root` 或 `ubuntu`）？
+
+拿到上述信息后，使用隔离的目标路径（避开已有私钥），直接通过安装助手的 `--setup-key` 自动生成**无密码**的一次性 Ed25519 密钥对并打开弹窗（不要在 PowerShell/Shell 里手敲 `ssh-keygen -N ''`，避免不同终端的引号解析把私钥误加密）。同时用 `--host`、`--port`、`--user` 预填弹窗（密码留给用户在弹窗中输入）。以 Linux/macOS Shell 为例：
 
 ~~~sh
-ssh-keygen -q -t ed25519 -N '' -f /path/to/setup-only
 python3 -m venv .venv
 .venv/bin/python -m pip install -r tools/requirements.txt
-.venv/bin/python tools/connect.py --public-key /path/to/setup-only.pub
+.venv/bin/python tools/connect.py --setup-key /path/to/setup-only --host <IP> --port <端口> --user <用户名>
 ~~~
 
-连接前核对 SSH 服务器指纹，遇到指纹变化时让用户用云控制台或管理员资料确认。Windows 虚拟环境的 Python 是 `.venv\Scripts\python.exe`，也可用 `py -3` 启动已具备依赖的 Python。首次 SSH 密码只在用户电脑的弹窗里输入。指纹核对成功后，助手把公钥加入授权文件，保存客户端 Key。验证 AI 自己能用新密钥登录，再接手服务器操作。
+Windows 虚拟环境的 Python 是 `.venv\Scripts\python.exe`（创建虚拟环境可用 `py -3 -m venv .venv`）。首次 SSH 密码只在用户电脑的弹窗里输入。连接成功后，助手把公钥加入授权文件并保存客户端 Key。验证 AI 自己能用新私钥登录（首次连接可加 `-o StrictHostKeyChecking=accept-new`），再接手服务器操作。
 
-如果你的 AI 终端在云端，把项目文件和公钥交给用户在自己的电脑启动安装助手。让用户在连接成功后复制客户端 API Key，保持窗口打开，并告诉你「已连接」。部署和登录阶段可复用该窗口的 SSH 连接。实在无法弹窗时，让用户使用自己的 SSH 终端，并用 SSH 隧道打开下文的临时登录界面。SSH 密码和 Google 凭据都由用户自己输入。
+如果你的 AI 终端在云端（无图形界面），可先在云端运行 `tools/connect.py --setup-key /path/to/setup-only --keygen-only` 生成密钥对（私钥留在云端），只把项目文件和生成的 `.pub` 公钥交给用户在自己电脑启动安装助手（`tools/connect.py --public-key setup-only.pub --host <IP> --port <端口> --user <用户名>`）。让用户在连接成功后复制客户端 API Key，保持窗口打开，并告诉你「已连接」。部署和登录阶段可复用该窗口的 SSH 连接。实在无法弹窗时，让用户使用自己的 SSH 终端，并用 SSH 隧道打开下文的临时登录界面。SSH 密码和 Google 凭据都由用户自己输入。
 
 服务器安装面向 Ubuntu 24.04 或 26.04 x86-64。先查系统、架构、可用端口以及管理员权限。AI 能非交互使用 sudo 时用 `sudo -n`。已经是 root 就直接运行管理员命令。需要交互 sudo 时，由用户在自己的终端输入密码。
 

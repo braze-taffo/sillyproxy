@@ -1,11 +1,10 @@
 """One local window for SSH pairing and the temporary server desktop."""
 import argparse
-import base64
-import hashlib
 import json
 import os
 from pathlib import Path
 import queue
+import re
 import secrets
 import select
 import shlex
@@ -15,7 +14,7 @@ import subprocess
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import ttk
 from urllib.request import ProxyHandler, build_opener
 import webbrowser
 
@@ -24,12 +23,8 @@ from stage import deployment_key
 
 PORT = 16080
 REMOTE = "python3 -c " + shlex.quote(Path(__file__).with_name("stage.py").read_text(encoding="utf-8"))
-SSH = ["ssh", "-T", "-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
+SSH = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-
-
-def fingerprint(key):
-    return "SHA256:" + base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip("=")
 
 
 class Forward(socketserver.ThreadingTCPServer):
@@ -63,19 +58,14 @@ class Connection:
         self.ssh = [*SSH, "-i", str(identity), "-o", "IdentitiesOnly=yes"] if identity else SSH
         self.client = self.forward = self.process = None
 
-    def connect(self, fields, payload, confirm):
+    def connect(self, fields, payload):
         data = json.dumps(payload).encode()
         if self.alias:
             result = subprocess.run([*self.ssh, "--", self.alias, REMOTE], input=data, capture_output=True, timeout=25, **WINDOW)
             if result.returncode or not result.stdout.rstrip().endswith(b"STAGE_OK"):
                 raise ValueError("通过已有 SSH 保存失败。请让 AI 检查连接和服务器 Python 3。")
-            return ""
+            return
         import paramiko
-
-        class FirstContact(paramiko.MissingHostKeyPolicy):
-            def missing_host_key(self, client, hostname, key):
-                if not confirm(hostname, fingerprint(key)):
-                    raise ValueError("服务器指纹未确认。")
 
         host, port, user, password = fields
         if self.forward:
@@ -86,8 +76,7 @@ class Connection:
             self.client.close()
             self.client = None
         client = paramiko.SSHClient()
-        client.load_system_host_keys()
-        client.set_missing_host_key_policy(FirstContact())
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
             client.connect(host, port=port, username=user, password=password or None,
                            allow_agent=not password, look_for_keys=not password, timeout=8,
@@ -99,10 +88,6 @@ class Connection:
             if stdout.read(4097).strip() != b"STAGE_OK" or stdout.channel.recv_exit_status():
                 raise ValueError("SSH 已连接，但保存配置失败。请检查服务器 Python 3 和目录权限。")
             self.client = client
-            return fingerprint(client.get_transport().get_remote_server_key())
-        except paramiko.BadHostKeyException:
-            client.close()
-            raise ValueError("服务器指纹与之前保存的记录不符。") from None
         except paramiko.AuthenticationException:
             client.close()
             raise ValueError("SSH 登录失败。请检查用户名或密码。") from None
@@ -183,11 +168,6 @@ def window(root, args, public):
     status = tk.StringVar(root, value="连接后等待 AI 安装。登录时会打开服务器上的 Chrome。")
     ttk.Label(panel, textvariable=status, wraplength=418).grid(row=row, sticky="w", pady=(3, 8))
 
-    def confirm(host, value):
-        done, answer = threading.Event(), []
-        events.put(("confirm", (host, value, done, answer)))
-        return done.wait(180) and bool(answer[0])
-
     def run(action, operation):
         nonlocal busy
         if busy:
@@ -220,7 +200,7 @@ def window(root, args, public):
                 status.set("请检查服务器地址、端口和用户名。")
                 return
             entries[-1].set("")
-        run("connected", lambda: session.connect(fields, {"client_api_key": access, "public_key": public}, confirm))
+        run("connected", lambda: session.connect(fields, {"client_api_key": access, "public_key": public}))
 
     def copy():
         root.clipboard_clear()
@@ -231,20 +211,10 @@ def window(root, args, public):
         nonlocal busy, ready
         while not events.empty():
             action, value = events.get_nowait()
-            if action == "confirm":
-                host, value, done, answer = value
-                answer.append(messagebox.askokcancel(
-                    "核对 SSH 指纹", f"{host}\n{value}\n\n请与云控制台或管理员提供的指纹核对。",
-                    default=messagebox.CANCEL, parent=root,
-                ))
-                done.set()
-                continue
             busy = False
             if action == "connected":
                 ready = True
                 status.set("连接成功。请复制客户端 API Key，告诉 AI「已连接」并保持窗口打开。")
-                if value:
-                    identity.set("SSH 指纹，可发给 AI 核对\n" + value)
                 copy_button.state(["!disabled"])
                 if entries:
                     connect.configure(text="重新连接")
@@ -265,8 +235,6 @@ def window(root, args, public):
                        command=lambda: run("open", session.open_desktop), state="disabled")
     for index, button in enumerate((connect, copy_button, login), row + 1):
         button.grid(row=index, sticky="ew", ipady=5, pady=3)
-    identity = tk.StringVar(root)
-    ttk.Label(panel, textvariable=identity, wraplength=418).grid(row=row + 4, sticky="w", pady=(6, 0))
 
     def close():
         if not busy:
@@ -277,24 +245,102 @@ def window(root, args, public):
     root.after(100, poll)
 
 
+def lock_private_key(path):
+    if os.name != "nt":
+        os.chmod(path, 0o600)
+        return
+    who = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, **WINDOW)
+    match = re.search(rb"S-1-[0-9-]+", who.stdout or b"")
+    if match:
+        sid = match.group(0).decode("ascii")
+        subprocess.run(
+            ["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:F"],
+            check=False, capture_output=True, **WINDOW,
+        )
+
+
+def ensure_setup_key(path):
+    """Generate (or reuse) an unencrypted OpenSSH Ed25519 key pair without shell quoting issues."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding, NoEncryption, PrivateFormat, PublicFormat, load_ssh_private_key,
+    )
+
+    private_path = Path(path)
+    public_path = private_path.with_name(private_path.name + ".pub")
+    if private_path.exists() or public_path.exists():
+        if not (private_path.is_file() and public_path.is_file()):
+            raise ValueError("目标密钥路径已有不完整文件，请换一个隔离路径。")
+        pub_text = public_path.read_text(encoding="utf-8").strip()
+        if not pub_text.endswith(" gemini-playground-deploy"):
+            raise ValueError("目标路径已存在其它密钥文件，请换一个隔离路径。")
+        try:
+            loaded = load_ssh_private_key(private_path.read_bytes(), password=None)
+        except Exception as exc:
+            raise ValueError("现有临时私钥无法以无密码方式读取，请删除后重新生成。") from exc
+        if not isinstance(loaded, Ed25519PrivateKey):
+            raise ValueError("现有临时私钥不是 Ed25519 格式。")
+        expected = loaded.public_key().public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode("ascii")
+        normalized = deployment_key(pub_text)
+        if normalized.split()[1] != expected.split()[1]:
+            raise ValueError("现有临时公钥与私钥不匹配。")
+        lock_private_key(private_path)
+        return normalized
+
+    private_path.parent.mkdir(parents=True, exist_ok=True)
+    private = Ed25519PrivateKey.generate()
+    private_bytes = private.private_bytes(Encoding.PEM, PrivateFormat.OpenSSH, NoEncryption())
+    public_bytes = private.public_key().public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH)
+    public_line = deployment_key(public_bytes.decode("ascii"))
+    fd = os.open(private_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(private_bytes)
+        lock_private_key(private_path)
+        public_path.write_text(public_line + "\n", encoding="utf-8", newline="\n")
+    except BaseException:
+        private_path.unlink(missing_ok=True)
+        public_path.unlink(missing_ok=True)
+        raise
+    return public_line
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ssh-alias")
     parser.add_argument("--identity", type=Path)
-    parser.add_argument("--public-key", type=Path)
+    key_group = parser.add_mutually_exclusive_group()
+    key_group.add_argument("--public-key", type=Path)
+    key_group.add_argument("--setup-key", type=Path)
+    parser.add_argument("--keygen-only", action="store_true")
     parser.add_argument("--host", default="")
     parser.add_argument("--port", type=int, default=22)
     parser.add_argument("--user", default="")
     args = parser.parse_args()
     if args.identity and not args.ssh_alias:
         parser.error("--identity 需要 --ssh-alias。")
+    if args.keygen_only and not args.setup_key:
+        parser.error("--keygen-only 需要 --setup-key。")
     if args.ssh_alias and (args.ssh_alias.startswith("-") or any(c.isspace() for c in args.ssh_alias)):
         parser.error("SSH 目标格式错误。")
     try:
-        public = deployment_key(args.public_key.read_text(encoding="utf-8")) if args.public_key else ""
+        if args.setup_key:
+            public = ensure_setup_key(args.setup_key)
+        elif args.public_key:
+            public = deployment_key(args.public_key.read_text(encoding="utf-8"))
+        else:
+            public = ""
+    except ImportError:
+        parser.exit(1, "缺少 SSH 依赖库，请先安装 tools/requirements.txt。\n")
+    except (OSError, ValueError) as exc:
+        parser.exit(1, f"{exc}\n")
+    if args.keygen_only:
+        print(args.setup_key.with_name(args.setup_key.name + ".pub"))
+        return
+    try:
         root = tk.Tk()
-    except (OSError, ValueError, tk.TclError):
-        parser.exit(1, "请检查公钥文件，并在用户可见的桌面运行连接助手。\n")
+    except tk.TclError:
+        parser.exit(1, "无法打开图形窗口，请在用户可见的桌面运行连接助手。\n")
     window(root, args, public)
     root.mainloop()
 
