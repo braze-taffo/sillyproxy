@@ -17,7 +17,6 @@ from playground import UPSTREAM_MODELS, Playground, PlaygroundError
 # gateway walk the configured list when one is unavailable.
 ALIAS = "gemini-playground"
 LOG = logging.getLogger("gateway")
-ALLOWED = {"model", "messages", "stream", "stream_options", "n", "user"}
 # Seconds a request may wait for the single browser slot before 429.
 QUEUE_WAIT = 30
 
@@ -54,15 +53,15 @@ def parse_chat(body, models):
     requested = body.get("model")
     if requested not in models:
         raise ValueError("Use one of: " + ", ".join(sorted(models)) + ".")
-    if set(body) - ALLOWED:
-        raise ValueError("This gateway supports text messages, model, and stream. Remove other generation settings.")
-    if body.get("n", 1) != 1:
+    # Extra client generation parameters (temperature, max_tokens, top_p,
+    # stream_options.include_usage, etc.) are ignored because AI Studio's web
+    # composer uses default settings and does not expose token usage.
+    count = body.get("n")
+    if count is not None and count != 1:
         raise ValueError("Only one answer per request is supported.")
-    stream = body.get("stream", False)
+    stream = False if body.get("stream") is None else body.get("stream")
     if not isinstance(stream, bool):
         raise ValueError("stream must be true or false.")
-    if body.get("stream_options", {}) not in ({}, None, {"include_usage": False}):
-        raise ValueError("Token usage is not available.")
     messages = body.get("messages")
     if not isinstance(messages, list) or not 1 <= len(messages) <= 80:
         raise ValueError("Send between 1 and 80 messages.")

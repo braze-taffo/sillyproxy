@@ -23,7 +23,7 @@ git clone https://github.com/braze-taffo/sillyproxy
 | API Key | 安装助手生成的客户端 API Key |
 | 模型 | `gemini-playground`（自动挑选），或 `/v1/models` 里列出的具体模型 |
 
-公网 IP 和端口即可使用。如果云服务器只开放标准 HTTP，安装指引提供端口 80 的配置，客户端填 `http://服务器公网IP/v1`。HTTP 会明文传输客户端 Key 和请求内容，可在云安全组限制来源 IP。已有 HTTPS 入口也可以接入。
+公网 IP 和端口即可使用。如果云服务器只开放标准 HTTP，安装指引提供端口 80 的配置，客户端填 `http://服务器公网IP/v1`。HTTP 会明文传输客户端 Key 和请求内容，可在云安全组限制来源 IP。已有 HTTPS 入口也可以接入。客户端附带的温度（`temperature`）、最大长度（`max_tokens`）、流式用量统计（`stream_options`）等额外参数会被网关静默忽略，统一使用 AI Studio 网页默认设置。
 
 ## 工作原理
 
