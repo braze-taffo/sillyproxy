@@ -34,8 +34,11 @@ def verify():
         return opener.open(Request(base + path, headers=headers, data=body), timeout=210)
 
     with get("/healthz", auth=False) as res:
-        if json.load(res).get("service") != "gemini-playground":
+        health = json.load(res)
+        if health.get("service") != "gemini-playground":
             raise ValueError("Wrong service.")
+        if health.get("version"):
+            print("网关版本", health["version"])
     try:
         with get("/v1/models", auth=False):
             raise ValueError("Missing authentication.")

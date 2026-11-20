@@ -19,7 +19,7 @@ from tkinter import messagebox, ttk
 from urllib.request import ProxyHandler, build_opener
 import webbrowser
 
-from stage import deployment_key, stage
+from stage import deployment_key
 
 
 PORT = 16080
@@ -58,16 +58,13 @@ class Forward(socketserver.ThreadingTCPServer):
 
 
 class Connection:
-    def __init__(self, local=False, alias=None, identity=None):
-        self.local, self.alias = local, alias
+    def __init__(self, alias=None, identity=None):
+        self.alias = alias
         self.ssh = [*SSH, "-i", str(identity), "-o", "IdentitiesOnly=yes"] if identity else SSH
         self.client = self.forward = self.process = None
 
     def connect(self, fields, payload, confirm):
         data = json.dumps(payload).encode()
-        if self.local:
-            stage(payload)
-            return ""
         if self.alias:
             result = subprocess.run([*self.ssh, "--", self.alias, REMOTE], input=data, capture_output=True, timeout=25, **WINDOW)
             if result.returncode or not result.stdout.rstrip().endswith(b"STAGE_OK"):
@@ -114,7 +111,6 @@ class Connection:
             raise
 
     def open_desktop(self):
-        port = PORT
         if self.alias:
             if self.process is None or self.process.poll() is not None:
                 with socket.socket() as reservation:
@@ -127,7 +123,7 @@ class Connection:
                 )
                 self.local_port = port
             port = self.local_port
-        elif not self.local:
+        else:
             if self.client is None or not self.client.get_transport().is_active():
                 raise ValueError("SSH 连接已断开。请重新连接。")
             if self.forward is None:
@@ -164,15 +160,14 @@ def window(root, args, public):
     panel.columnconfigure(0, weight=1)
     row = 0
     events = queue.Queue()
-    session = Connection(args.local, args.ssh_alias, args.identity)
+    session = Connection(args.ssh_alias, args.identity)
     ready = False
     busy = False
     access = secrets.token_urlsafe(32)
-    labels = {True: "在本机准备配置", False: "连接到服务器"}
-    ttk.Label(panel, text=labels[args.local], font=("TkDefaultFont", 15, "bold")).grid(row=row, sticky="w", pady=(0, 10))
+    ttk.Label(panel, text="连接到服务器", font=("TkDefaultFont", 15, "bold")).grid(row=row, sticky="w", pady=(0, 10))
     row += 1
     entries = []
-    if not (args.local or args.ssh_alias):
+    if not args.ssh_alias:
         for title, value, mask in (
             ("服务器 IP 或主机名", args.host, ""), ("SSH 端口", str(args.port), ""),
             ("SSH 用户名", args.user, ""), ("SSH 密码（已有密钥时可留空）", "", "*"),
@@ -284,17 +279,13 @@ def window(root, args, public):
 
 def main():
     parser = argparse.ArgumentParser()
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--local", action="store_true")
-    mode.add_argument("--ssh-alias")
+    parser.add_argument("--ssh-alias")
     parser.add_argument("--identity", type=Path)
     parser.add_argument("--public-key", type=Path)
     parser.add_argument("--host", default="")
     parser.add_argument("--port", type=int, default=22)
     parser.add_argument("--user", default="")
     args = parser.parse_args()
-    if args.local and (os.name != "posix" or not Path("/proc").exists() or args.public_key):
-        parser.error("本机安装要求 Linux。")
     if args.identity and not args.ssh_alias:
         parser.error("--identity 需要 --ssh-alias。")
     if args.ssh_alias and (args.ssh_alias.startswith("-") or any(c.isspace() for c in args.ssh_alias)):

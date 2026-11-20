@@ -22,6 +22,17 @@ ALLOWED = {"model", "messages", "stream", "stream_options", "n", "user"}
 QUEUE_WAIT = 30
 
 
+def load_version():
+    try:
+        value = Path(__file__).with_name("VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "unknown"
+    return value or "unknown"
+
+
+VERSION = load_version()
+
+
 def model_entries(upstream):
     entries = [{"id": ALIAS, "object": "model", "created": 0, "owned_by": "playground"}]
     for name in upstream:
@@ -105,7 +116,7 @@ def make_app(browser, client_key, upstream=None):
         return await handler(request)
 
     async def health(_):
-        return web.json_response({"ok": True, "service": "gemini-playground"})
+        return web.json_response({"ok": True, "service": "gemini-playground", "version": VERSION})
 
     async def models(request):
         if "name" in request.match_info:

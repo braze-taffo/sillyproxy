@@ -124,7 +124,7 @@ esac
 umask 022
 python3 -m venv "$release/.venv"
 "$release/.venv/bin/python" -m pip install --disable-pip-version-check --no-cache-dir -r "$here/../requirements.txt"
-for source in gateway.py playground.py desktop.py display.py; do
+for source in gateway.py playground.py desktop.py display.py VERSION; do
     install -m 0644 "$here/../$source" "$release/$source"
 done
 (cd "$release" && .venv/bin/python -c 'import sys; from gateway import load_config; load_config(sys.argv[1])' "$snapshot/config.json")
@@ -143,7 +143,8 @@ for _ in {1..30}; do
        curl --noproxy '*' -fsS --max-time 1 "http://$host:$port/healthz" 2>/dev/null |
            grep -Fq '"service": "gemini-playground"'; then
         systemctl enable "$unit"
-        printf '网关启动成功，监听 %s。下一步是首次登录。\n' "$listen"
+        version=$(tr -d '\r\n' < "$release/VERSION")
+        printf '网关启动成功（v%s），监听 %s。下一步是首次登录。\n' "$version" "$listen"
         exit 0
     fi
     sleep 1
